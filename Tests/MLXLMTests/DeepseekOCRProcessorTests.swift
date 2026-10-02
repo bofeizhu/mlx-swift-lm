@@ -245,6 +245,20 @@ final class DeepseekOCRProcessorTests: XCTestCase {
         }
     }
 
+    /// Python assigns image features into the text embeddings, which keeps their dtype.
+    /// Promoting to float32 here leaves the prefill cache, and so every decode step, in float32.
+    func testMergeKeepsTheTextEmbeddingDtype() throws {
+        let model = try makeModel(configJSON: Self.mergeModelConfigJSON)
+        model.apply { $0.asType(.bfloat16) }
+        let inputIds = MLXArray([5, 999, 6].map { Int32($0) }).reshaped(1, 3)
+        let features = MLXArray.ones([1, 1, 32], dtype: .float32)
+
+        let merged = model.mergeInputIdsWithImageFeatures(
+            inputIds: inputIds, imageFeatures: features)
+
+        XCTAssertEqual(merged.dtype, .bfloat16)
+    }
+
     func testPrepareTextOnlyReturnsChatTemplateTokensWithoutAnImage() async throws {
         let processor = try makeProcessor()
         let input = UserInput(prompt: "document parsing. ")

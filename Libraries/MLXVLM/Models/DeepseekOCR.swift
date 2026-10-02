@@ -1334,7 +1334,10 @@ public class DeepseekOCR: Module, VLMModel, KVCacheDimensionProvider {
         let imageMask = inputIds .== config.baseConfiguration.imageTokenId
         let featureIndex = clip(
             cumsum(imageMask.asType(.int32), axis: 1) - 1, min: 0, max: imageFeatures.dim(1) - 1)
+        // Python assigns features into the text embeddings, which keeps their dtype.
+        // `which` would promote instead and leave the whole decode in float32.
         let imageEmbeddings = takeAlong(imageFeatures, featureIndex[.ellipsis, .newAxis], axis: 1)
+            .asType(textEmbeddings.dtype)
         return which(imageMask[.ellipsis, .newAxis], imageEmbeddings, textEmbeddings)
     }
 
@@ -1672,9 +1675,10 @@ private final class VisionAttention: Module {
         var relPosResized = relPos
         if relPos.dim(0) != maxRelDist {
             let scale = Float(maxRelDist) / Float(relPos.dim(0))
+            // Upsample returns float32; cast back as Python's get_rel_pos does.
             relPosResized = Upsample(scaleFactor: [scale], mode: .linear(alignCorners: false))(
                 relPos.expandedDimensions(axis: 0)
-            ).squeezed(axis: 0)
+            ).squeezed(axis: 0).asType(relPos.dtype)
         }
         let qCoords = MLXArray(
             (0 ..< qSize).map { Float($0) * max(Float(kSize) / Float(qSize), 1.0) })
@@ -1913,7 +1917,9 @@ private final class VisionEncoder: Module {
         }
         let scaleH = Float(height) / Float(posEmbed.dim(1))
         let scaleW = Float(width) / Float(posEmbed.dim(2))
+        // Upsample returns float32; cast back as Python's get_abs_pos_sam does.
         return Upsample(scaleFactor: [scaleH, scaleW], mode: .cubic(alignCorners: false))(posEmbed)
+            .asType(posEmbed.dtype)
     }
 
     func callAsFunction(_ pixelValues: MLXArray) -> MLXArray {
@@ -1986,6 +1992,7 @@ private final class ClipVisionEmbeddings: Module {
             ],
             mode: .cubic(alignCorners: false)
         )(patchEmbedding.reshaped(1, sourceSize, sourceSize, config.hiddenSize))
+        .asType(positionEmbedding.dtype)
         return concatenated(
             [clsToken, resized.reshaped(1, destinationSize * destinationSize, config.hiddenSize)],
             axis: 1)

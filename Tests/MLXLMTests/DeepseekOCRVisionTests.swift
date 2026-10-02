@@ -35,6 +35,19 @@ final class DeepseekOCRVisionTests: XCTestCase {
         XCTAssertEqual(features.shape, [1, 256, 1280])
     }
 
+    /// Shipped packs are bf16. A 640² local tile interpolates the SAM and CLIP position
+    /// embeddings, and `Upsample` returns float32, which must not leak into the features.
+    func testLocalTileFeaturesKeepTheWeightDtype() throws {
+        let model = try makeModel()
+        model.apply { $0.asType(.bfloat16) }
+        let pixels = zeros([1, 640, 640, 3], type: Float.self).asType(.bfloat16)
+
+        let features = model.projectedImageFeaturesForTesting(pixels)
+
+        XCTAssertEqual(features.shape, [1, 100, 1280])
+        XCTAssertEqual(features.dtype, .bfloat16)
+    }
+
     func testSanitizeRemapsSAMWeightsAndPreservesShapes() throws {
         let model = try makeModel()
         let weights: [String: MLXArray] = [
