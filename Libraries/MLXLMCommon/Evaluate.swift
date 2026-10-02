@@ -934,6 +934,9 @@ public struct TokenIterator: TokenIteratorProtocol {
         return convertToToken(logits: result.logits)
     }
 
+    /// Steps between cache-state evaluations (Python mlx-vlm `DEFAULT_CACHE_EVAL_INTERVAL`).
+    static let cacheEvalInterval = 50
+
     mutating public func next() -> Int? {
         if let maxTokens, tokenCount >= maxTokens {
             return nil
@@ -950,14 +953,18 @@ public struct TokenIterator: TokenIteratorProtocol {
             // compute the next state and async eval the next token
             let token = step(previous: previousY)
             y = .init(tokens: token)
-            // Evaluate the cache state together with the token: caches update
+            tokenCount += 1
+
+            // Settle the cache state together with the token: caches update
             // through functional ops (concatenation, slice assignment), and an
             // unevaluated chain of those updates keeps every prior step's
-            // intermediates alive. Python mlx-lm settles cache state the same
-            // way in its generation loop.
-            asyncEval([token] + cache.flatMap { $0.state })
-
-            tokenCount += 1
+            // intermediates alive. Doing so on every step is measurably slower,
+            // so settle at Python mlx-vlm's interval instead.
+            if tokenCount % Self.cacheEvalInterval == 0 {
+                asyncEval([token] + cache.flatMap { $0.state })
+            } else {
+                asyncEval(token)
+            }
 
             // Periodically return freed buffers that cannot be reused (odd or
             // monotonically growing sizes accumulate in the pool otherwise).
