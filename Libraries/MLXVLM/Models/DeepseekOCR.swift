@@ -765,7 +765,8 @@ public struct DeepseekOCRProcessor: UserInputProcessor {
         var processed = [MLXArray]()
         for block in 0 ..< (tilesWide * tilesHigh) {
             let x = (block % tilesWide) * tileSize
-            let y = (block / tilesWide) * tileSize
+            // CIImage's origin is bottom-left; Python (PIL) tiles rows top to bottom.
+            let y = (tilesHigh - 1 - block / tilesWide) * tileSize
             let cropRect = CGRect(x: x, y: y, width: tileSize, height: tileSize)
             let crop =
                 resized

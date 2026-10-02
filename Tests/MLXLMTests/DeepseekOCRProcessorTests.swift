@@ -78,6 +78,27 @@ final class DeepseekOCRProcessorTests: XCTestCase {
         XCTAssertLessThan(localPixels.sum().item(Float.self), -500_000)
     }
 
+    /// Python (PIL) crops tile rows top to bottom. CIImage's origin is bottom-left, so an
+    /// unflipped row index hands the model the bottom of the page first.
+    func testGundamLocalTilesRunTopRowFirst() async throws {
+        let processor = try makeProcessor()
+        let bottom = CIImage(color: .blue).cropped(to: CGRect(x: 0, y: 0, width: 640, height: 640))
+        let top = CIImage(color: .red).cropped(to: CGRect(x: 0, y: 640, width: 640, height: 640))
+        let input = UserInput(
+            prompt: "document parsing.",
+            images: [.ciImage(top.composited(over: bottom))])
+
+        let prepared = try await processor.internalPrepare(input: input)
+
+        XCTAssertEqual(prepared.imagesSpatialCrop.map { [$0.w, $0.h] }, [[1, 2]])
+        let tiles = prepared.localCrops.asType(.float32)
+        // Channels are RGB, normalized to [-1, 1].
+        XCTAssertGreaterThan(tiles[0, 0].mean().item(Float.self), 0.9, "first tile is red")
+        XCTAssertLessThan(tiles[0, 2].mean().item(Float.self), -0.9)
+        XCTAssertGreaterThan(tiles[1, 2].mean().item(Float.self), 0.9, "second tile is blue")
+        XCTAssertLessThan(tiles[1, 0].mean().item(Float.self), -0.9)
+    }
+
     func testBaseModeIsSelectableAndUsesSingleViewTokenGrid() async throws {
         let processor = try makeProcessor()
         let input = UserInput(
