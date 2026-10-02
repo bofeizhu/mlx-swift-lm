@@ -119,6 +119,25 @@ final class DeepseekOCRProcessorTests: XCTestCase {
         XCTAssertEqual(unlimitedIds, Array(deepseekIds.dropLast()))
     }
 
+    /// Loaded packs get their processor from the registry, so its `UnlimitedOCRProcessor`
+    /// entry is what applies the Unlimited prompt format in production.
+    func testRegistryBuildsUnlimitedOCRProcessorWithTheUnlimitedPromptFormat() async throws {
+        let tokenizer = DeterministicTokenizer(templateTrailingId: 500)
+        let input = UserInput(prompt: "document parsing.")
+
+        var lastIds = [String: Int32]()
+        for processorType in ["DeepseekOCRProcessor", "UnlimitedOCRProcessor"] {
+            let processor = try await VLMProcessorTypeRegistry.shared.createModel(
+                configuration: Data(Self.processorConfigJSON.utf8),
+                processorType: processorType, tokenizer: tokenizer)
+            let tokens = try await processor.prepare(input: input).text.tokens
+            lastIds[processorType] = tokens.asArray(Int32.self).last
+        }
+
+        XCTAssertEqual(lastIds["DeepseekOCRProcessor"], 500)
+        XCTAssertEqual(lastIds["UnlimitedOCRProcessor"], 21)
+    }
+
     func testBaseModeIsSelectableAndUsesSingleViewTokenGrid() async throws {
         let processor = try makeProcessor()
         let input = UserInput(
