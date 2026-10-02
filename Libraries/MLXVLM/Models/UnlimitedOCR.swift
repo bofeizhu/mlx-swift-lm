@@ -18,10 +18,10 @@ public typealias UnlimitedOCRConfiguration = DeepseekOCRConfiguration
 ///
 /// Python `processing_unlimitedocr.py` subclasses DeepseekOCRProcessor with
 /// torch-free `from_pretrained`, default `sft_format="unlimitedocr"`,
-/// `max_num=32` tiling, and multipage single-`<image>` support. Comparing the
-/// two processors tensor-by-tensor showed the single-page inference templates
-/// are identical, so a distinct Swift type would carry no behavior — hence a
-/// typealias rather than a subclass. Multipage fused prepare
+/// `max_num=32` tiling, and multipage single-`<image>` support. The two differ
+/// in one prompt detail: Python's Unlimited template puts no space after the last
+/// message, selected here with ``DeepseekOCRProcessor/PromptFormat/unlimited``
+/// rather than a subclass. Multipage fused prepare
 /// (`Multi page parsing.`, base mode) and optional `max_num=32` live on the
 /// shared processor: pass multiple `UserInput.Image`s and
 /// ``DeepseekOCRProcessor/modeContext(_:)`` `.base`, or

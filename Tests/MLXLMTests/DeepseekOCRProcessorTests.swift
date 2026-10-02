@@ -99,6 +99,26 @@ final class DeepseekOCRProcessorTests: XCTestCase {
         XCTAssertLessThan(tiles[1, 0].mean().item(Float.self), -0.9)
     }
 
+    /// Unlimited-OCR packs ship DeepSeek's template, which puts a space after every message.
+    /// Python's Unlimited processor omits it after the last one.
+    func testUnlimitedPromptFormatDropsTheTemplateTrailingSeparator() async throws {
+        let tokenizer = DeterministicTokenizer(templateTrailingId: 500)
+        let input = UserInput(
+            prompt: "document parsing.",
+            images: [.ciImage(makeSolidImage(width: 200, height: 200, color: .red))],
+            additionalContext: DeepseekOCRProcessor.modeContext(.base))
+
+        let deepseek = try await makeProcessor(tokenizer: tokenizer)
+            .internalPrepare(input: input)
+        let unlimited = try await makeProcessor(tokenizer: tokenizer, promptFormat: .unlimited)
+            .internalPrepare(input: input)
+
+        let deepseekIds = deepseek.inputIds.asArray(Int32.self)
+        let unlimitedIds = unlimited.inputIds.asArray(Int32.self)
+        XCTAssertEqual(deepseekIds.last, 500)
+        XCTAssertEqual(unlimitedIds, Array(deepseekIds.dropLast()))
+    }
+
     func testBaseModeIsSelectableAndUsesSingleViewTokenGrid() async throws {
         let processor = try makeProcessor()
         let input = UserInput(
@@ -498,13 +518,14 @@ final class DeepseekOCRProcessorTests: XCTestCase {
             ])
     }
 
-    private func makeProcessor(tokenizer: any Tokenizer = DeterministicTokenizer()) throws
-        -> DeepseekOCRProcessor
-    {
+    private func makeProcessor(
+        tokenizer: any Tokenizer = DeterministicTokenizer(),
+        promptFormat: DeepseekOCRProcessor.PromptFormat = .deepseek
+    ) throws -> DeepseekOCRProcessor {
         let config = try JSONDecoder().decode(
             DeepseekOCRProcessorConfiguration.self,
             from: Data(Self.processorConfigJSON.utf8))
-        return DeepseekOCRProcessor(config, tokenizer: tokenizer)
+        return DeepseekOCRProcessor(config, tokenizer: tokenizer, promptFormat: promptFormat)
     }
 
     private func makeSolidImage(width: CGFloat, height: CGFloat, color: CIColor) -> CIImage {
@@ -609,6 +630,9 @@ private struct DeterministicTokenizer: Tokenizer {
     /// Whether the chat template renders `bos_token` at its head. Off by default, as
     /// swift-transformers encodes the rendered template with `addSpecialTokens: false`.
     var templateEmitsBOS = false
+    /// Id the chat template appends after each message, modeling the production
+    /// template's `{{content}} `; `nil` renders content alone.
+    var templateTrailingId: Int?
 
     func encode(text: String, addSpecialTokens: Bool) -> [Int] {
         guard !text.isEmpty else { return [] }
@@ -680,6 +704,9 @@ private struct DeterministicTokenizer: Tokenizer {
             // It does not translate Qwen-style structured image parts into <image>.
             if let content = message["content"] as? String {
                 ids.append(contentsOf: encode(text: content, addSpecialTokens: false))
+            }
+            if let templateTrailingId {
+                ids.append(templateTrailingId)
             }
         }
         return ids

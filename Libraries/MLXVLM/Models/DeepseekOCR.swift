@@ -548,12 +548,29 @@ public struct DeepseekOCRProcessor: UserInputProcessor {
         modeContext(mode).merging([maxNumTilesContextKey: unlimitedMaxNumTiles]) { _, new in new }
     }
 
+    /// Which Python processor's default chat template the prompt follows.
+    public enum PromptFormat: Sendable {
+        /// DeepSeek-OCR: a space follows every message, including the last.
+        case deepseek
+        /// Unlimited-OCR: a space between messages, none after the last.
+        case unlimited
+    }
+
     private let config: DeepseekOCRProcessorConfiguration
     private let tokenizer: any Tokenizer
+    private let promptFormat: PromptFormat
 
     public init(_ config: DeepseekOCRProcessorConfiguration, tokenizer: any Tokenizer) {
+        self.init(config, tokenizer: tokenizer, promptFormat: .deepseek)
+    }
+
+    public init(
+        _ config: DeepseekOCRProcessorConfiguration, tokenizer: any Tokenizer,
+        promptFormat: PromptFormat
+    ) {
         self.config = config
         self.tokenizer = tokenizer
+        self.promptFormat = promptFormat
     }
 
     private func preprocess(image: CIImage, side: Int) -> MLXArray {
@@ -816,10 +833,19 @@ public struct DeepseekOCRProcessor: UserInputProcessor {
     private func chatTemplateTokens(for input: UserInput) throws -> [Int] {
         let messages = DeepseekOCRMessageGenerator(imageToken: config.imageToken).generate(
             from: input)
-        var promptTokens = try tokenizer.applyChatTemplate(
-            messages: messages,
-            tools: input.tools,
-            additionalContext: input.additionalContext)
+        var promptTokens: [Int]
+        let contents = messages.compactMap { $0["content"] as? String }
+        if promptFormat == .unlimited, contents.count == messages.count {
+            // Unlimited-OCR packs ship DeepSeek's template, whose trailing space Python's
+            // UnlimitedOCRProcessor drops. That extra token derails the first decode step.
+            promptTokens = tokenizer.encode(
+                text: contents.joined(separator: " "), addSpecialTokens: false)
+        } else {
+            promptTokens = try tokenizer.applyChatTemplate(
+                messages: messages,
+                tools: input.tools,
+                additionalContext: input.additionalContext)
+        }
         // The rendered chat template is encoded without special tokens, while Python's
         // processor always prepends BOS (`processing_deepseekocr.py tokenize_with_images`,
         // literal id 0 — used here only when the tokenizer reports no BOS token). A template
